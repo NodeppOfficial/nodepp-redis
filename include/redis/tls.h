@@ -26,15 +26,15 @@
 
 namespace nodepp { namespace _redis_ { GENERATOR( cb ){
 protected:
-    
+
     string_t raw, data;
-    ptr_t<ulong> pos; 
+    ptr_t<ulong> pos;
 
 public:
 
     template< class T, class V, class U > coEmit( T& fd, V& cb, U& self ){
     coStart pos = ptr_t<ulong>({ 1, 0 }); coYield(1); raw = fd.read_line();
-        
+
         if(  regex::test( raw, "[$*]-1",true ) ){ coEnd; }
         if(  regex::test( raw, "^[+]" ) || raw.empty() ){ coEnd; }
         if( !regex::test( raw, "[$*:]-?\\d+" ) ){ process::error( raw.slice(0,-2) ); }
@@ -64,7 +64,7 @@ public:
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp { class redis_https_t {
+namespace nodepp { class redis_tls_t {
 protected:
 
     struct NODE {
@@ -73,22 +73,22 @@ protected:
     };  ptr_t<NODE> obj;
 
 public:
-    
-    virtual ~redis_https_t() noexcept {
+
+    virtual ~redis_tls_t() noexcept {
         if( obj.count() > 1 )
           { return; } free();
     }
-    
+
     /*─······································································─*/
 
     virtual void free() const noexcept {
         if( obj->state == 0 ){ return; }
             obj->state  = 0; obj->fd.free();
     }
-    
+
     /*─······································································─*/
-    
-    redis_https_t ( string_t uri, ssl_t* ssl ) : obj( new NODE ) {
+
+    redis_tls_t ( string_t uri, ssl_t* ssl ) : obj( new NODE ) {
         if( ssl.create_client() == -1 )
           { process::error("Error Initializing SSL context"); }
         if( !url::is_valid( uri ) )
@@ -103,57 +103,47 @@ public:
 
         if( !user.empty() && !pass.empty() ){
              Auth = string::format("AUTH %s %s\n", user.get(), pass.get() );
-        } elif( !auth.empty() ){
+        } elif( !auth.empty() ) {
              Auth = string::format("AUTH %s\n", auth.get() );
         }
-
-        auto agent = agent_t();
-        agent.recv_timeout = 0;
-        agent.send_timeout = 0;
 
         obj->fd = ssocket_t();
         obj->fd.IPPROTO = IPPROTO_TCP;
         obj->fd.onError([]( ... ){ });
-        obj->fd.socket( dns::lookup(host), port ); 
-        obj->fd.set_sockopt( agent );
+        obj->fd.socket( dns::lookup(host), port );
 
-        if( obj->fd.connect() < 0 ){ 
+        if( obj->fd.connect() < 0 ){
             process::error("While Connecting to Redis");
         }
 
-        obj->fd.ssl = new ssl_t( ssl, obj->fd.get_fd() ); 
+        obj->fd.ssl = new ssl_t( ssl, obj->fd.get_fd() );
         obj->fd.ssl->set_hostname( host );
 
-        if( obj->fd.ssl->connect() <= 0 ){ 
+        if( obj->fd.ssl->connect() <= 0 ){
             process::error("While Handshaking TLS to Redis");
         }
 
         if( !Auth.empty() ){ exec( Auth ); }
 
     }
-    
-    redis_https_t () : obj( new NODE ) { obj->state = 0; }
-    
+
+    redis_tls_t () : obj( new NODE ) { obj->state = 0; }
+
     /*─······································································─*/
 
     void exec( const string_t& cmd, const function_t<void,string_t>& cb ) const {
-        if( obj->state == 0 || obj->fd.is_closed() )
-          { return; }  obj->fd.write( cmd + "\n" ); 
-
-        auto self = type::bind( this );
+        if( obj->state == 0 || obj->fd.is_closed() ) { return; }
+        auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
         _redis_::cb task; process::add( task, obj->fd, cb, self );
     }
 
     array_t<string_t> exec( const string_t& cmd ) const {
-        if( obj->state == 0 || obj->fd.is_closed() )
-          { return nullptr; } obj->fd.write( cmd + "\n" ); 
-            array_t<string_t> res;
-
-        auto self = type::bind( this );
+        if( obj->state == 0 || obj->fd.is_closed() ) { return nullptr; }
+        array_t<string_t> res; auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
         function_t<void,string_t> cb([&]( string_t data ){ res.push( data ); });
         _redis_::cb task; process::await( task, obj->fd, cb, self ); return res;
     }
-    
+
     /*─······································································─*/
 
     string_t raw( const string_t& cmd ) const noexcept {
@@ -166,11 +156,11 @@ public:
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp { namespace redis { namespace https {
+namespace nodepp { namespace redis { namespace tls {
 
     template<class...T>
-    redis_https_t add( const T&... args ) {
-        return redis_https_t( args... );
+    redis_tls_t add( const T&... args ) {
+        return redis_tls_t( args... );
     }
 
 }}}

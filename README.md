@@ -4,7 +4,7 @@ Run a **Redis** client in Nodepp
 ## Example
 ```cpp
 #include <nodepp/nodepp.h>
-#include <redis/http.h>
+#include <redis/tcp.h>
 
 using namespace nodepp;
 

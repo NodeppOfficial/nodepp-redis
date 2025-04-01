@@ -26,9 +26,9 @@
 
 namespace nodepp { namespace _redis_ { GENERATOR( cb ){
 protected:
-    
+
     string_t raw, data;
-    ptr_t<ulong> pos; 
+    ptr_t<ulong> pos;
 
 public:
 
@@ -64,7 +64,7 @@ public:
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp { class redis_http_t {
+namespace nodepp { class redis_tcp_t {
 protected:
 
     struct NODE {
@@ -73,23 +73,23 @@ protected:
     };  ptr_t<NODE> obj;
 
 public:
-    
-    virtual ~redis_http_t() noexcept {
+
+    virtual ~redis_tcp_t() noexcept {
         if( obj.count() > 1 )
           { return; } free();
     }
-    
+
     /*─······································································─*/
 
     virtual void free() const noexcept {
         if( obj->state == 0 ){ return; }
             obj->state  = 0; obj->fd.free();
     }
-    
+
     /*─······································································─*/
-    
-    redis_http_t ( string_t uri ) : obj( new NODE ) {
-        if( !url::is_valid( uri ) ){ 
+
+    redis_tcp_t ( string_t uri ) : obj( new NODE ) {
+        if( !url::is_valid( uri ) ){
             process::error("Invalid Redis Url");
         }
 
@@ -101,51 +101,41 @@ public:
         auto Auth = string_t();
 
         if( !user.empty() && !pass.empty() ){
-             Auth = string::format("AUTH %s %s\n", user.get(), pass.get() );
-        } elif( !auth.empty() ){
-             Auth = string::format("AUTH %s\n", auth.get() );
+            Auth = string::format("AUTH %s %s\n", user.get(), pass.get() );
+        } elif( !auth.empty() ) {
+            Auth = string::format("AUTH %s\n", auth.get() );
         }
-
-        auto agent = agent_t();
-        agent.recv_timeout = 0;
-        agent.send_timeout = 0;
 
         obj->fd = socket_t();
         obj->fd.IPPROTO = IPPROTO_TCP;
         obj->fd.onError([]( ... ){ });
-        obj->fd.socket( dns::lookup(host), port ); 
-        obj->fd.set_sockopt( agent );
+        obj->fd.socket( dns::lookup(host), port );
 
-        if( obj->fd.connect() < 0 ){ 
+        if( obj->fd.connect() < 0 ){
             process::error("While Connecting to Redis");
         }
-        
+
         if( !Auth.empty() ){ exec( Auth ); }
 
     }
-    
-    redis_http_t () : obj( new NODE ) { obj->state = 0; }
-    
+
+    redis_tcp_t () : obj( new NODE ) { obj->state = 0; }
+
     /*─······································································─*/
 
     void exec( const string_t& cmd, const function_t<void,string_t>& cb ) const {
-        if( obj->state == 0 || obj->fd.is_closed() )
-          { return; }  obj->fd.write( cmd + "\n" ); 
-
-        auto self = type::bind( this );
+        if( obj->state == 0 || obj->fd.is_closed() ) { return; }
+        auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
         _redis_::cb task; process::add( task, obj->fd, cb, self );
     }
 
     array_t<string_t> exec( const string_t& cmd ) const {
-        if( obj->state == 0 || obj->fd.is_closed() )
-          { return nullptr; } obj->fd.write( cmd + "\n" ); 
-            array_t<string_t> res;
-
-        auto self = type::bind( this );
+        if( obj->state == 0 || obj->fd.is_closed() ) { return nullptr; }
+        array_t<string_t> res; auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
         function_t<void,string_t> cb([&]( string_t data ){ res.push( data ); });
         _redis_::cb task; process::await( task, obj->fd, cb, self ); return res;
     }
-    
+
     /*─······································································─*/
 
     string_t raw( const string_t& cmd ) const noexcept {
@@ -158,11 +148,11 @@ public:
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
-namespace nodepp { namespace redis { namespace http {
+namespace nodepp { namespace redis { namespace tcp {
 
     template<class...T>
-    redis_http_t add( const T&... args ) {
-        return redis_http_t( args... );
+    redis_tcp_t add( const T&... args ) {
+        return redis_tcp_t( args... );
     }
 
 }}}

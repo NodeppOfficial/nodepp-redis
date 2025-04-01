@@ -1,12 +1,12 @@
 
 #include <nodepp/nodepp.h>
-#include <redis/http.h>
+#include <redis/tcp.h>
 
 using namespace nodepp;
 
 void onMain() {
 
-    auto db = redis::http::add("db://localhost:6379");
+    auto db = redis::tcp::add("db://localhost:6379");
 
     db.exec("LPUSH FOO BAT1");
     db.exec("LPUSH FOO BAT2");
