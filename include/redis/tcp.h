@@ -15,6 +15,7 @@
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #include <nodepp/nodepp.h>
+#include <nodepp/promise.h>
 #include <nodepp/stream.h>
 #include <nodepp/tcp.h>
 #include <nodepp/url.h>
@@ -74,20 +75,6 @@ protected:
 
 public:
 
-    virtual ~redis_tcp_t() noexcept {
-        if( obj.count() > 1 )
-          { return; } free();
-    }
-
-    /*─······································································─*/
-
-    virtual void free() const noexcept {
-        if( obj->state == 0 ){ return; }
-            obj->state  = 0; obj->fd.free();
-    }
-
-    /*─······································································─*/
-
     redis_tcp_t ( string_t uri ) : obj( new NODE ) {
         if( !url::is_valid( uri ) ){
             process::error("Invalid Redis Url");
@@ -119,21 +106,32 @@ public:
 
     }
 
+    /*─······································································─*/
+
+    redis_tcp_t ( socket_t cli ) : obj( new NODE ) { obj->fd = cli; }
+
     redis_tcp_t () : obj( new NODE ) { obj->state = 0; }
 
     /*─······································································─*/
 
-    void exec( const string_t& cmd, const function_t<void,string_t>& cb ) const {
-        if( obj->state == 0 || obj->fd.is_closed() ) { return; }
-        auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
-        _redis_::cb task; process::add( task, obj->fd, cb, self );
+    virtual ~redis_tcp_t() noexcept {
+        if( obj.count() > 1 )
+          { return; } free();
     }
+
+    /*─······································································─*/
 
     array_t<string_t> exec( const string_t& cmd ) const {
         if( obj->state == 0 || obj->fd.is_closed() ) { return nullptr; }
         array_t<string_t> res; auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
         function_t<void,string_t> cb([&]( string_t data ){ res.push( data ); });
         _redis_::cb task; process::await( task, obj->fd, cb, self ); return res;
+    }
+
+    void exec( const string_t& cmd, const function_t<void,string_t>& cb ) const {
+        if( obj->state == 0 || obj->fd.is_closed() ) { return; }
+        auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
+        _redis_::cb task; process::add( task, obj->fd, cb, self );
     }
 
     /*─······································································─*/
@@ -144,16 +142,55 @@ public:
         return obj->fd.read();
     }
 
+    /*─······································································─*/
+
+    virtual void free() const noexcept {
+        if( obj->state == 0 ){ return; }
+            obj->state  = 0; obj->fd.free();
+    }
+
 };}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
 namespace nodepp { namespace redis { namespace tcp {
 
+    promise_t<redis_tcp_t,except_t> connect( const string_t& uri ) {
+    return promise_t<redis_tcp_t,except_t> ([=]( function_t<void,redis_tcp_t> res, function_t<void,except_t> rej ){
+        if( !url::is_valid( uri ) ){ rej( except_t("Invalid Redis URL") ); return; }
+
+        auto host = url::hostname( uri );
+        auto port = url::port( uri );
+        auto auth = url::auth( uri );
+        auto user = url::user( uri );
+        auto pass = url::pass( uri );
+        auto Auth = string_t();
+
+        if( !user.empty() && !pass.empty() ){
+            Auth = string::format("AUTH %s %s\n", user.get(), pass.get() );
+        } elif( !auth.empty() ) {
+            Auth = string::format("AUTH %s\n", auth.get() );
+        }
+
+        auto client = tcp_t ([=]( socket_t cli ){
+             redis_tcp_t raw (cli); if( !Auth.empty() )
+             { raw.exec( Auth ); } res( raw ); return;
+        });
+
+        client.onError([=]( except_t error ){ rej(error); });
+        client.connect( host, port );
+
+    }); }
+
+    /*─······································································─*/
+
     template<class...T>
-    redis_tcp_t add( const T&... args ) {
-        return redis_tcp_t( args... );
-    }
+    redis_tcp_t await( const T&... args ) { return redis_tcp_t( args... ); }
+
+    /*─······································································─*/
+
+    template<class...T>
+    redis_tcp_t add( const T&... args ) { return redis_tcp_t( args... ); }
 
 }}}
 

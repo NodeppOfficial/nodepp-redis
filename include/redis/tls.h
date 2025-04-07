@@ -15,6 +15,7 @@
 /*────────────────────────────────────────────────────────────────────────────*/
 
 #include <nodepp/nodepp.h>
+#include <nodepp/promise.h>
 #include <nodepp/stream.h>
 #include <nodepp/tls.h>
 #include <nodepp/url.h>
@@ -74,22 +75,8 @@ protected:
 
 public:
 
-    virtual ~redis_tls_t() noexcept {
-        if( obj.count() > 1 )
-          { return; } free();
-    }
-
-    /*─······································································─*/
-
-    virtual void free() const noexcept {
-        if( obj->state == 0 ){ return; }
-            obj->state  = 0; obj->fd.free();
-    }
-
-    /*─······································································─*/
-
     redis_tls_t ( string_t uri, ssl_t* ssl ) : obj( new NODE ) {
-        if( ssl.create_client() == -1 )
+        if( ssl->create_client() == -1 )
           { process::error("Error Initializing SSL context"); }
         if( !url::is_valid( uri ) )
           { process::error("Invalid Redis Url"); }
@@ -116,7 +103,7 @@ public:
             process::error("While Connecting to Redis");
         }
 
-        obj->fd.ssl = new ssl_t( ssl, obj->fd.get_fd() );
+        obj->fd.ssl = new ssl_t( *ssl, obj->fd.get_fd() );
         obj->fd.ssl->set_hostname( host );
 
         if( obj->fd.ssl->connect() <= 0 ){
@@ -127,7 +114,18 @@ public:
 
     }
 
+    /*─······································································─*/
+
+    redis_tls_t ( ssocket_t cli ) : obj( new NODE ) { obj->fd = cli; }
+
     redis_tls_t () : obj( new NODE ) { obj->state = 0; }
+
+    /*─······································································─*/
+
+    virtual ~redis_tls_t() noexcept {
+        if( obj.count() > 1 )
+          { return; } free();
+    }
 
     /*─······································································─*/
 
@@ -152,16 +150,56 @@ public:
         return obj->fd.read();
     }
 
+    /*─······································································─*/
+
+    virtual void free() const noexcept {
+        if( obj->state == 0 ){ return; }
+            obj->state  = 0; obj->fd.free();
+    }
+
 };}
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
 namespace nodepp { namespace redis { namespace tls {
 
+    promise_t<redis_tls_t,except_t> connect( const string_t& uri ) {
+    return promise_t<redis_tls_t,except_t> ([=]( function_t<void,redis_tls_t> res, function_t<void,except_t> rej ){
+        if( !url::is_valid( uri ) ){ rej( except_t("Invalid Redis URL") ); return; }
+
+        auto host = url::hostname( uri );
+        auto port = url::port( uri );
+        auto auth = url::auth( uri );
+        auto user = url::user( uri );
+        auto pass = url::pass( uri );
+        auto Auth = string_t();
+        auto ssl  = ssl_t();
+
+        if( !user.empty() && !pass.empty() ){
+            Auth = string::format("AUTH %s %s\n", user.get(), pass.get() );
+        } elif( !auth.empty() ) {
+            Auth = string::format("AUTH %s\n", auth.get() );
+        }
+
+        auto client = tls_t ([=]( ssocket_t cli ){
+             redis_tls_t raw (cli); if( !Auth.empty() )
+             { raw.exec( Auth ); } res( raw ); return;
+        }, &ssl );
+
+        client.onError([=]( except_t error ){ rej(error); });
+        client.connect( host, port );
+
+    }); }
+
+    /*─······································································─*/
+
     template<class...T>
-    redis_tls_t add( const T&... args ) {
-        return redis_tls_t( args... );
-    }
+    redis_tls_t await( const T&... args ) { return redis_tls_t( args... ); }
+
+    /*─······································································─*/
+
+    template<class...T>
+    redis_tls_t add( const T&... args ) { return redis_tls_t( args... ); }
 
 }}}
 
