@@ -34,7 +34,7 @@ protected:
 public:
 
     template< class T, class V, class U > coEmit( T& fd, V& cb, U& self ){
-    coStart pos = ptr_t<ulong>({ 1, 0 }); coYield(1); raw = fd.read_line();
+    gnStart pos = ptr_t<ulong>({ 1, 0 }); coYield(1); raw = fd.read_line();
 
         if(  regex::test( raw, "[$*]-1",true ) ){ coEnd; }
         if(  regex::test( raw, "^[+]" ) || raw.empty() ){ coEnd; }
@@ -56,7 +56,7 @@ public:
         if ( pos[0] != 0 ){ coGoto(1); }
         }
 
-    coStop
+    gnStop
     }
 
 };}}
