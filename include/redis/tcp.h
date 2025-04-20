@@ -27,13 +27,11 @@
 
 namespace nodepp { namespace _redis_ { GENERATOR( cb ){
 protected:
-
-    string_t raw, data;
-    ptr_t<ulong> pos;
-
+    string_t raw, data; ptr_t<ulong> pos;
 public:
 
     template< class T, class V, class U > coEmit( T& fd, V& cb, U& self ){
+        if( fd.is_closed() ){ return -1; }
     gnStart pos = ptr_t<ulong>({ 1, 0 }); coYield(1); raw = fd.read_line();
 
         if(  regex::test( raw, "[$*]-1",true ) ){ coEnd; }
@@ -43,9 +41,9 @@ public:
         if( regex::test( raw, "[*]\\d+" ) ){
             pos[0] = string::to_ulong( regex::match( raw, "\\d+" ) );
             if( pos[0] == 0 ){ coEnd; } coGoto(1);
-        } elif( regex::test( raw, "[$]\\d+" ) ) {
+        } elif( regex::test ( raw, "[$]\\d+" ) ) {
             pos[1] = string::to_ulong( regex::match( raw, "\\d+" ) ) + 2;
-        } elif( regex::test( raw, "[:]\\d+" ) ) {
+        } elif( regex::test ( raw, "[:]\\d+" ) ) {
             cb( regex::match( raw, "\\d+" ) ); coEnd;
         }
 
@@ -53,8 +51,7 @@ public:
         while( data.size() != pos[1] ){
                data += fd.read( pos[1]-data.size() );
         }      cb( data.slice( 0,-2 ) ); coNext;
-        if ( pos[0] != 0 ){ coGoto(1); }
-        }
+        if ( pos[0] != 0 ){ coGoto(1); } }
 
     gnStop
     }
@@ -69,55 +66,21 @@ namespace nodepp { class redis_tcp_t {
 protected:
 
     struct NODE {
-        socket_t fd;
-        int state=1;
+        bool state=0;
+        socket_t  fd;
     };  ptr_t<NODE> obj;
 
 public:
 
-    redis_tcp_t ( string_t uri ) : obj( new NODE ) {
-        if( !url::is_valid( uri ) ){
-            process::error("Invalid Redis Url");
-        }
+    redis_tcp_t ( socket_t cli ) : obj( new NODE ) { set_fd(cli); }
 
-        auto host = url::hostname( uri );
-        auto port = url::port( uri );
-        auto auth = url::auth( uri );
-        auto user = url::user( uri );
-        auto pass = url::pass( uri );
-        auto Auth = string_t();
-
-        if( !user.empty() && !pass.empty() ){
-            Auth = string::format("AUTH %s %s\n", user.get(), pass.get() );
-        } elif( !auth.empty() ) {
-            Auth = string::format("AUTH %s\n", auth.get() );
-        }
-
-        obj->fd = socket_t();
-        obj->fd.IPPROTO = IPPROTO_TCP;
-        obj->fd.onError([]( ... ){ });
-        obj->fd.socket( dns::lookup(host), port );
-
-        if( obj->fd.connect() < 0 ){
-            process::error("While Connecting to Redis");
-        }
-
-        if( !Auth.empty() ){ exec( Auth ); }
-
-    }
+    redis_tcp_t () : obj( new NODE ) {}
 
     /*─······································································─*/
 
-    redis_tcp_t ( socket_t cli ) : obj( new NODE ) { obj->fd = cli; }
+    virtual ~redis_tcp_t() noexcept { if( obj.count()>1 ) { return; } free(); }
 
-    redis_tcp_t () : obj( new NODE ) { obj->state = 0; }
-
-    /*─······································································─*/
-
-    virtual ~redis_tcp_t() noexcept {
-        if( obj.count() > 1 )
-          { return; } free();
-    }
+    void set_fd( socket_t cli ) const noexcept { obj->fd=cli; obj->state=1; }
 
     /*─······································································─*/
 
@@ -159,6 +122,7 @@ namespace nodepp { namespace redis { namespace tcp {
     return promise_t<redis_tcp_t,except_t> ([=]( function_t<void,redis_tcp_t> res, function_t<void,except_t> rej ){
         if( !url::is_valid( uri ) ){ rej( except_t("Invalid Redis URL") ); return; }
 
+        auto rdis = type::bind( new redis_tcp_t() );
         auto host = url::hostname( uri );
         auto port = url::port( uri );
         auto auth = url::auth( uri );
@@ -173,8 +137,8 @@ namespace nodepp { namespace redis { namespace tcp {
         }
 
         auto client = tcp_t ([=]( socket_t cli ){
-             redis_tcp_t raw (cli); if( !Auth.empty() )
-             { raw.exec( Auth ); } res( raw ); return;
+             rdis->set_fd( cli ); if( !Auth.empty() )
+             { rdis->exec( Auth ); } res(*rdis); return;
         });
 
         client.onError([=]( except_t error ){ rej(error); });
@@ -185,12 +149,18 @@ namespace nodepp { namespace redis { namespace tcp {
     /*─······································································─*/
 
     template<class...T>
-    redis_tcp_t await( const T&... args ) { return redis_tcp_t( args... ); }
+    redis_tcp_t await( const T&... args ) {
+        auto raw = connect( args... ).await();
+        if( !raw.has_value() ){ throw raw.error(); } return raw.value();
+    }
 
     /*─······································································─*/
 
     template<class...T>
-    redis_tcp_t add( const T&... args ) { return redis_tcp_t( args... ); }
+    redis_tcp_t add( const T&... args ) {
+        auto raw = connect( args... ).await();
+        if( !raw.has_value() ){ throw raw.error(); } return raw.value();
+    }
 
 }}}
 
