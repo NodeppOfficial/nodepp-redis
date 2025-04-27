@@ -27,30 +27,39 @@
 
 namespace nodepp { namespace _redis_ { GENERATOR( cb ){
 protected:
+    _file_::line line; _file_::read read;
     string_t raw, data; ptr_t<ulong> pos;
 public:
 
     template< class T, class V, class U > coEmit( T& fd, V& cb, U& self ){
         if( fd.is_closed() ){ return -1; }
-    gnStart pos = ptr_t<ulong>({ 1, 0 }); coYield(1); raw = fd.read_line();
+    gnStart
 
-        if(  regex::test( raw, "[$*]-1",true ) ){ coEnd; }
+        pos = ptr_t<ulong>({ 1, 0 }); coYield(1);
+
+        while( this->line( &fd )==1 ){ coNext; }
+           if( this->line.state ==0 ){ coEnd;  }
+         raw = this->line.data;
+
+        if(  regex::test( raw, "[$*]-1",true ) )        { coEnd; }
         if(  regex::test( raw, "^[+]" ) || raw.empty() ){ coEnd; }
-        if( !regex::test( raw, "[$*:]-?\\d+" ) ){ process::error( raw.slice(0,-2) ); }
+        if( !regex::test( raw, "[$*:]-?\\d+" ) )        { process::error( raw.slice(0,-2) ); coEnd; }
 
         if( regex::test( raw, "[*]\\d+" ) ){
             pos[0] = string::to_ulong( regex::match( raw, "\\d+" ) );
-            if( pos[0] == 0 ){ coEnd; } coGoto(1);
+        if( pos[0] == 0 ){ coEnd; } coGoto(1);
         } elif( regex::test ( raw, "[$]\\d+" ) ) {
             pos[1] = string::to_ulong( regex::match( raw, "\\d+" ) ) + 2;
         } elif( regex::test ( raw, "[:]\\d+" ) ) {
             cb( regex::match( raw, "\\d+" ) ); coEnd;
         }
 
-        while( pos[0]-->0 ){ data.clear();
+        while( pos[0]-->0 )           { data.clear();
         while( data.size() != pos[1] ){
-               data += fd.read( pos[1]-data.size() );
-        }      cb( data.slice( 0,-2 ) ); coNext;
+        while( this->read( &fd, pos[1]-data.size() )==1 ){ coNext; }
+           if( this->read.state==0 ){ coEnd; }data+=this->read.data;
+        }      cb( data.slice( 0,-2 ) );
+
         if ( pos[0] != 0 ){ coGoto(1); } }
 
     gnStop
@@ -80,7 +89,11 @@ public:
 
     virtual ~redis_tls_t() noexcept { if( obj.count()>1 ) { return; } free(); }
 
-    void set_fd( ssocket_t cli ) const noexcept { obj->fd=cli; obj->state=1; }
+    /*─······································································─*/
+
+    void set_fd( ssocket_t cli ) const noexcept { obj->fd=cli; obj->state=1;     }
+    bool is_available()          const noexcept { return obj->fd.is_available(); }
+    bool is_closed()             const noexcept { return obj->fd.is_closed();    }
 
     /*─······································································─*/
 
