@@ -92,6 +92,7 @@ public:
     /*─······································································─*/
 
     void set_fd( socket_t cli ) const noexcept { obj->fd=cli; obj->state=1;     }
+    socket_t&  get_fd()         const noexcept { return obj->fd;                }
     bool is_available()         const noexcept { return obj->fd.is_available(); }
     bool is_closed()            const noexcept { return obj->fd.is_closed();    }
 
