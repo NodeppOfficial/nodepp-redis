@@ -98,17 +98,17 @@ public:
 
     /*─······································································─*/
 
+    void exec( const string_t& cmd, const function_t<void,string_t>& cb ) const {
+        if( obj->state == 0 || obj->fd.is_closed() ) { return; }
+        auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
+        _redis_::cb task; process::add( task, obj->fd, cb, self );
+    }
+
     array_t<string_t> exec( const string_t& cmd ) const {
         if( obj->state == 0 || obj->fd.is_closed() ) { return nullptr; }
         array_t<string_t> res; auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
         function_t<void,string_t> cb([&]( string_t data ){ res.push( data ); });
         _redis_::cb task; process::await( task, obj->fd, cb, self ); return res;
-    }
-
-    void exec( const string_t& cmd, const function_t<void,string_t>& cb ) const {
-        if( obj->state == 0 || obj->fd.is_closed() ) { return; }
-        auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
-        _redis_::cb task; process::add( task, obj->fd, cb, self );
     }
 
     /*─······································································─*/
