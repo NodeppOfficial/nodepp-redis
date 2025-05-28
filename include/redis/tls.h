@@ -25,42 +25,61 @@
 #ifndef NODEPP_REDIS_GENERATOR
 #define NODEPP_REDIS_GENERATOR
 
-namespace nodepp { namespace _redis_ { GENERATOR( cb ){
+namespace nodepp { namespace _redis_ { GENERATOR( stream ){
 protected:
-    _file_::line line; _file_::read read;
-    string_t raw, data; ptr_t<ulong> pos;
+    _file_::write write; _file_::read read;
+    string_t raw, data;  ptr_t<ulong> pos;
+    _file_::line  line;  ulong time=0;
 public:
 
-    template< class T, class V, class U > coEmit( T& fd, V& cb, U& self ){
-        if( fd.is_closed() ){ return -1; }
+    template< class V, class U > 
+    coEmit( string_t cmd, const V& cb, const U& self ){ auto fd = self->get_fd();
+        if( fd.is_closed() )                               { self->release(); return -1; }
+        if( time>0&&(process::now()-time)>TIME_SECONDS(1) ){ self->release(); return -1; }
     gnStart
 
-        pos = ptr_t<ulong>({ 1, 0 }); coYield(1);
+        coWait( self->is_used() ==1 ); self->use();
+        coWait( write( &fd,cmd )==1 );
+            if( write.state     ==0 ){ coGoto (2); }
+        pos = ptr_t<ulong> ({ 1, 0 }); coYield(1);
+        time= process::now();
 
-        while( this->line( &fd )==1 ){ coNext; }
-           if( this->line.state ==0 ){ coEnd;  }
-         raw = this->line.data;
+        coWait( line( &fd )==1 );
+            if( line.state ==0 ){ coGoto(2); } raw = line.data;
 
-        if(  regex::test( raw, "[$*]-1",true ) )        { coEnd; }
-        if(  regex::test( raw, "^[+]" ) || raw.empty() ){ coEnd; }
-        if( !regex::test( raw, "[$*:]-?\\d+" ) )        { process::error( raw.slice(0,-2) ); coEnd; }
+        if( regex::test( raw, "[$*]-1",true ) )      { coGoto(2); }
+        if( regex::test( raw, "^[+]" )||raw.empty() ){ coGoto(2); }
+        if(!regex::test( raw, "[$*:]-?\\d+" ) )      { process::error( raw.slice(0,-2) ); coGoto(2); }
 
         if( regex::test( raw, "[*]\\d+" ) ){
             pos[0] = string::to_ulong( regex::match( raw, "\\d+" ) );
-        if( pos[0] == 0 ){ coEnd; } coGoto(1);
+        if( pos[0] == 0 ){ coGoto(2); } coGoto(1);
         } elif( regex::test ( raw, "[$]\\d+" ) ) {
             pos[1] = string::to_ulong( regex::match( raw, "\\d+" ) ) + 2;
         } elif( regex::test ( raw, "[:]\\d+" ) ) {
-            cb( regex::match( raw, "\\d+" ) ); coEnd;
+            cb( regex::match( raw, "\\d+" ) ); coGoto(2); 
         }
 
         while( pos[0]-->0 )           { data.clear();
         while( data.size() != pos[1] ){
-        while( this->read( &fd, pos[1]-data.size() )==1 ){ coNext; }
-           if( this->read.state==0 ){ coEnd; }data+=this->read.data;
-        }      cb( data.slice( 0,-2 ) );
+        coWait( read( &fd, pos[1]-data.size() )==1 );
+            if( read.state==0 ){ coGoto(2); } data+=read.data;
+        }   cb( data.slice(0,-2) );
 
-        if ( pos[0] != 0 ){ coGoto(1); } }
+        if( pos[0]!=0 ) { coGoto(1); }} 
+        coYield(2); self->release();
+
+    gnStop
+    }
+
+    template< class U > 
+    coEmit( string_t cmd, const U& self ){ auto fd = self->get_fd();
+        if( fd.is_closed() )                               { self->release(); return -1; }
+        if( time>0&&(process::now()-time)>TIME_SECONDS(1) ){ self->release(); return -1; }
+    gnStart
+
+        coWait( self->is_used() ==1 ); self->use();
+        coWait( write( &fd,cmd )==1 ); self->release();
 
     gnStop
     }
@@ -75,6 +94,7 @@ namespace nodepp { class redis_tls_t {
 protected:
 
     struct NODE {
+        bool used =0;
         bool state=0;
         ssocket_t fd;
     };  ptr_t<NODE> obj;
@@ -82,7 +102,6 @@ protected:
 public:
 
     redis_tls_t ( ssocket_t cli ) : obj( new NODE ) { set_fd(cli); }
-
     redis_tls_t () : obj( new NODE ) {}
 
     /*─······································································─*/
@@ -98,25 +117,31 @@ public:
 
     /*─······································································─*/
 
+    bool is_used()              const noexcept { return obj->used; }
+    void use()                  const noexcept { obj->used = 1; }
+    void release()              const noexcept { obj->used = 0; }
+
+    /*─······································································─*/
+
     void exec( const string_t& cmd, const function_t<void,string_t>& cb ) const {
         if( cmd.empty() || obj->state==0 || obj->fd.is_closed() ) { return; }
-        auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
-        _redis_::cb task; process::add( task, obj->fd, cb, self );
+        auto self = type::bind(this); _redis_::stream task; 
+        process::poll::add( task, cmd+"\n", cb, self );
     }
 
     array_t<string_t> exec( const string_t& cmd ) const {
         if( cmd.empty() || obj->state==0 || obj->fd.is_closed() ) { return nullptr; }
-        array_t<string_t> res; auto self = type::bind( this ); obj->fd.write( cmd + "\n" );
-        function_t<void,string_t> cb([&]( string_t data ){ res.push( data ); });
-        _redis_::cb task; process::await( task, obj->fd, cb, self ); return res;
+        array_t<string_t> res; auto self = type::bind(this); _redis_::stream task; 
+        function_t<void,string_t> cb([&]( string_t data ){ res.push(data); });
+        process::await( task, cmd+"\n", cb, self ); return res;
     }
 
     /*─······································································─*/
 
-    string_t raw( const string_t& cmd ) const noexcept {
-        if( obj->state == 0 || obj->fd.is_closed() )
-          { return nullptr; }  obj->fd.write( cmd + "\n" );
-        return obj->fd.read();
+    void send( const string_t& cmd ) const {
+        if( cmd.empty() || obj->state==0 || obj->fd.is_closed() ) { return; }
+        auto self = type::bind(this); _redis_::stream task; 
+        process::await( task, cmd+"\n", self ); 
     }
 
     /*─······································································─*/
@@ -146,9 +171,9 @@ namespace nodepp { namespace redis { namespace tls {
         auto ssl  = ssl_t();
 
         if( !user.empty() && !pass.empty() ){
-            Auth = string::format("AUTH %s %s\n", user.get(), pass.get() );
+            Auth = string::format("AUTH %s %s", user.get(), pass.get() );
         } elif( !auth.empty() ) {
-            Auth = string::format("AUTH %s\n", auth.get() );
+            Auth = string::format("AUTH %s", auth.get() );
         }
 
         auto client = tls_t ([=]( ssocket_t cli ){
@@ -178,6 +203,26 @@ namespace nodepp { namespace redis { namespace tls {
     }
 
 }}}
+    
+/*────────────────────────────────────────────────────────────────────────────*/
+
+#ifndef REDIS_FORMAT
+#define REDIS_FORMAT
+namespace nodepp { namespace redis { 
+    template< class V, class... T >
+string_t format( const V& argc, const T&... args ){
+    string_t result = string::to_string(argc); ulong n=0;
+    
+    string::map([&]( const string_t arg ){ 
+        if( arg.empty() || result.empty() ){ return; }
+        if( regex::test(arg,"[<\'\">]|\\N") ){ result=nullptr; return; }
+        string_t reg = "\\$\\{" + string::to_string(n) + "\\}";
+        result = regex::replace_all( result, reg, arg ); n++;
+    },  args... ); 
+    
+    return result;
+}}}
+#endif
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
