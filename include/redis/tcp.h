@@ -38,11 +38,10 @@ public:
         if( time>0&&(process::now()-time)>TIME_SECONDS(1) ){ self->release(); return -1; }
     gnStart
 
-        coWait( self->is_used() ==1 ); self->use();
+        coWait( self->is_used() ==1 ); self->use(); time=process::now();
         coWait( write( &fd,cmd )==1 );
             if( write.state     ==0 ){ coGoto (2); }
-        pos = ptr_t<ulong> ({ 1, 0 }); coYield(1);
-        time= process::now();
+        pos = ptr_t<ulong> ({ 1, 0 }); coYield(1);  time=process::now();
 
         coWait( line( &fd )==1 );
             if( line.state ==0 ){ coGoto(2); } raw = line.data;
@@ -78,7 +77,7 @@ public:
         if( time>0&&(process::now()-time)>TIME_SECONDS(1) ){ self->release(); return -1; }
     gnStart
 
-        coWait( self->is_used() ==1 ); self->use();
+        coWait( self->is_used() ==1 ); self->use();     time=process::now();
         coWait( write( &fd,cmd )==1 ); self->release();
 
     gnStop
