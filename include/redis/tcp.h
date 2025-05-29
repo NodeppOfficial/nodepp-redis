@@ -32,7 +32,7 @@ protected:
     _file_::line  line;  ulong time=0;
 public:
 
-    template< class V, class U > 
+    template< class V, class U >
     coEmit( string_t cmd, const V& cb, const U& self ){ auto fd = self->get_fd();
         if( fd.is_closed() )                               { self->release(); return -1; }
         if( time>0&&(process::now()-time)>TIME_SECONDS(1) ){ self->release(); return -1; }
@@ -66,13 +66,13 @@ public:
             if( read.state==0 ){ coGoto(2); } data+=read.data;
         }   cb( data.slice(0,-2) );
 
-        if( pos[0]!=0 ) { coGoto(1); }} 
+        if( pos[0]!=0 ) { coGoto(1); }}
         coYield(2); self->release();
 
     gnStop
     }
 
-    template< class U > 
+    template< class U >
     coEmit( string_t cmd, const U& self ){ auto fd = self->get_fd();
         if( fd.is_closed() )                               { self->release(); return -1; }
         if( time>0&&(process::now()-time)>TIME_SECONDS(1) ){ self->release(); return -1; }
@@ -101,12 +101,9 @@ protected:
 
 public:
 
+   ~redis_tcp_t () noexcept { if( obj.count()>1 ) { return; } free(); }
     redis_tcp_t ( socket_t cli ) : obj( new NODE ) { set_fd(cli); }
     redis_tcp_t () : obj( new NODE ) {}
-
-    /*─······································································─*/
-
-    virtual ~redis_tcp_t() noexcept { if( obj.count()>1 ) { return; } free(); }
 
     /*─······································································─*/
 
@@ -118,6 +115,7 @@ public:
     /*─······································································─*/
 
     bool is_used()              const noexcept { return obj->used; }
+    void close()                const noexcept { obj->fd.close(); }
     void use()                  const noexcept { obj->used = 1; }
     void release()              const noexcept { obj->used = 0; }
 
@@ -125,13 +123,13 @@ public:
 
     void exec( const string_t& cmd, const function_t<void,string_t>& cb ) const {
         if( cmd.empty() || obj->state==0 || obj->fd.is_closed() ) { return; }
-        auto self = type::bind(this); _redis_::stream task; 
+        auto self = type::bind(this); _redis_::stream task;
         process::poll::add( task, cmd+"\n", cb, self );
     }
 
     array_t<string_t> exec( const string_t& cmd ) const {
         if( cmd.empty() || obj->state==0 || obj->fd.is_closed() ) { return nullptr; }
-        array_t<string_t> res; auto self = type::bind(this); _redis_::stream task; 
+        array_t<string_t> res; auto self = type::bind(this); _redis_::stream task;
         function_t<void,string_t> cb([&]( string_t data ){ res.push(data); });
         process::await( task, cmd+"\n", cb, self ); return res;
     }
@@ -140,8 +138,8 @@ public:
 
     void send( const string_t& cmd ) const {
         if( cmd.empty() || obj->state==0 || obj->fd.is_closed() ) { return; }
-        auto self = type::bind(this); _redis_::stream task; 
-        process::await( task, cmd+"\n", self ); 
+        auto self = type::bind(this); _redis_::stream task;
+        process::await( task, cmd+"\n", self );
     }
 
     /*─······································································─*/
