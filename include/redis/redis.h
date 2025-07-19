@@ -27,7 +27,8 @@
 
 namespace nodepp { namespace _redis_ { GENERATOR( stream ){
 protected:
-    _file_::write write; _file_::read read;
+    generator::file::write write; 
+    generator::file::read  read;
 public:
 
     template< class V, class U >
@@ -102,7 +103,7 @@ public:
     void exec( const string_t& cmd, const function_t<void,string_t>& cb ) const {
         if( cmd.empty() || is_closed() || obj->fd.is_closed() ) { return; }
         auto self = type::bind(this); _redis_::stream task;
-        process::poll::add( task, cmd+"\n", cb, self );
+        process::add( task, cmd+"\n", cb, self );
     }
 
     array_t<string_t> exec( const string_t& cmd ) const {
@@ -118,7 +119,7 @@ public:
         if( cmd.empty() || is_closed() || obj->fd.is_closed() ) { return; }
         auto self = type::bind(this); _redis_::stream task;
         function_t<void,string_t> cb([=]( string_t ){});
-        process::poll::add( task, cmd+"\n", cb, self );
+        process::add( task, cmd+"\n", cb, self );
     }
 
     void await( const string_t& cmd ) const {
