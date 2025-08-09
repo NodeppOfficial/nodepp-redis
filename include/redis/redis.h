@@ -22,6 +22,19 @@
 
 /*────────────────────────────────────────────────────────────────────────────*/
 
+namespace nodepp { namespace redis {
+
+    regex_t reg0 = regex_t( "([^\r]+)\r\n" );
+    regex_t reg1 = regex_t( "^[+]" );
+    regex_t reg2 = regex_t( "^[-]" );
+    regex_t reg3 = regex_t( "^[:]" );
+    regex_t reg4 = regex_t( "^[$]" );
+    regex_t reg5 = regex_t( "^[!]" );
+
+} }
+
+/*────────────────────────────────────────────────────────────────────────────*/
+
 #ifndef NODEPP_REDIS_GENERATOR
 #define NODEPP_REDIS_GENERATOR
 
@@ -41,15 +54,16 @@ public:
         coWait( read ( &fd )    ==1 );
             if( read .state     <=0 ){ coGoto(2); }
 
-        do { auto list =regex::get_memory( read.data, "([^\r]+)\r\n" );
-        for( ulong x=0; x<list.size(); ++x ){
+        do { redis::reg0.search_all(read.data); 
+        auto list =redis::reg0.get_memory(); redis::reg0.clear_memory();
+        for( ulong x=0; x<list.size(); ++x ){ /*----------------------*/
             
-            if( regex::test( list[x], "^[+]" ) ){ cb( list[x].slice(1) );  }
-          elif( regex::test( list[x], "^[-]" ) ){ cb( list[x].slice(1) );  }
-          elif( regex::test( list[x], "^[:]" ) ){ cb( list[x].slice(1) );  }
-          elif( regex::test( list[x], "^[$]" ) ){
+            if( redis::reg1.test( list[x] ) ){ cb( list[x].slice(1) );  }
+          elif( redis::reg2.test( list[x] ) ){ cb( list[x].slice(1) );  }
+          elif( redis::reg3.test( list[x] ) ){ cb( list[x].slice(1) );  }
+          elif( redis::reg4.test( list[x] ) ){
             if( string::to_int( list[x].slice(1) )>0 ){ cb( list[++x] ); }}
-          elif( regex::test( list[x], "^[!]" ) ){
+          elif( redis::reg5.test( list[x] ) ){
             if( string::to_int( list[x].slice(1) )>0 ){ cb( list[++x] ); }}
           else{ continue; }
 
