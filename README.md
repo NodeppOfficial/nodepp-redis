@@ -1,9 +1,34 @@
 # Nodepp Asynchronous Redis Client
-
 A high-performance, asynchronous TCP client for the Redis in-memory data store, built specifically for the Nodepp framework. This client wraps raw TCP sockets to handle the Redis Serialization Protocol (RESP) using Nodepp's promises, coroutines, and generators for efficient, non-blocking network I/O.
 
-##  Connection and Authentication
+## Dependencies & Cmake Integration
+```bash
+include(FetchContent)
 
+FetchContent_Declare(
+	nodepp
+	GIT_REPOSITORY   https://github.com/NodeppOfficial/nodepp
+	GIT_TAG          origin/main
+	GIT_PROGRESS     ON
+)
+FetchContent_MakeAvailable(nodepp)
+
+FetchContent_Declare(
+	nodepp-redis
+	GIT_REPOSITORY   https://github.com/NodeppOfficial/nodepp-redis
+	GIT_TAG          origin/main
+	GIT_PROGRESS     ON
+)
+FetchContent_MakeAvailable(nodepp-redis)
+
+#[...]
+
+target_link_libraries( #[...]
+	PUBLIC nodepp nodepp-redis #[...]
+)
+```
+
+##  Connection and Authentication
 Connections are managed using standard Redis URI format. Authentication credentials provided in the URI are automatically handled by the client upon connection.
 
 ```cpp
@@ -32,11 +57,9 @@ void main() {
 ```
 
 ## Asynchronous API Reference
-
 The redis_t class provides three core methods that align with Nodepp's event loop structure for executing raw RESP commands. Note: Commands must be sent in the raw RESP format (e.g., SET mykey myvalue\r\n).
 
 **1. Promise-based (.resolve()) - Preferred Method**
-
 Runs the command and returns a promise that resolves with an array of responses (or rejects on error/closed connection).
 
 ```cpp
@@ -52,7 +75,6 @@ db.resolve("GET FOO")
 ```
 
 **2. Synchronous/Blocking (.await()) - Fiber Only**
-
 A convenience method for use within a Nodepp coroutine (fiber), allowing the code to look synchronous while internally yielding the fiber until the response is ready.
 
 ```cpp
@@ -67,7 +89,6 @@ try {
 ```
 
 **3. Fire-and-Forget (.emit())**
-
 Used primarily for commands where you don't need to wait for a full response (like simple SETs) or for streaming results (though streaming is limited by the current parser).
 
 ```cpp
@@ -83,3 +104,6 @@ db.emit("LRANGE FOO", []( string_t row ) {
 ``` bash
 g++ -o main main.cpp -I ./include ; ./main
 ```
+
+## License
+**Nodepp-redis** is distributed under the MIT License. See the LICENSE file for more details.
