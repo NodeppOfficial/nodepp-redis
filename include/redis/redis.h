@@ -34,12 +34,14 @@ public:
     template< class V, class U >
     coEmit( string_t cmd, const V& cb, const U& self ){
 
-        static regex_t reg0 = regex_t( "([^\r]+)\r\n" );
-        static regex_t reg1 = regex_t( "^[+]" );
-        static regex_t reg2 = regex_t( "^[-]" );
-        static regex_t reg3 = regex_t( "^[:]" );
-        static regex_t reg4 = regex_t( "^[$]" );
-        static regex_t reg5 = regex_t( "^[!]" );
+        thread_local static ptr_t<regex_t> reg ({
+            regex_t( "([^\r]+)\r\n" ),
+            regex_t( "^[+]" ),
+            regex_t( "^[-]" ),
+            regex_t( "^[:]" ),
+            regex_t( "^[$]" ),
+            regex_t( "^[!]" )
+        });
 
     auto fd = self->get_fd() ; coBegin
 
@@ -49,16 +51,16 @@ public:
         coWait( read ( &fd )    ==1 );
             if( read .state     <=0 ){ coGoto(2); }
 
-        do { reg0.search_all(read.data); 
-        auto list =reg0.get_memory(); reg0.clear_memory();
+        do { reg[0].search_all(read.data); 
+        auto list =reg[0].get_memory(); reg[0].clear_memory();
         for( ulong x=0; x<list.size(); ++x ){ /*--------*/
             
-          if  ( reg1.test( list[x] ) ){ cb( list[x].slice(1) );  }
-          elif( reg2.test( list[x] ) ){ cb( list[x].slice(1) );  }
-          elif( reg3.test( list[x] ) ){ cb( list[x].slice(1) );  }
-          elif( reg4.test( list[x] ) ){
+          if  ( reg[1].test( list[x] ) ){ cb( list[x].slice(1) );  }
+          elif( reg[2].test( list[x] ) ){ cb( list[x].slice(1) );  }
+          elif( reg[3].test( list[x] ) ){ cb( list[x].slice(1) );  }
+          elif( reg[4].test( list[x] ) ){
           if  ( string::to_int( list[x].slice(1) )>0 ){ cb( list[++x] ); }}
-          elif( reg5.test( list[x] ) ){
+          elif( reg[5].test( list[x] ) ){
           if  ( string::to_int( list[x].slice(1) )>0 ){ cb( list[++x] ); }}
           else{ continue; }
 
@@ -91,14 +93,14 @@ public:
 
     /*─······································································─*/
      
-   ~redis_t () noexcept { if( obj.count()>1 ) { return; } free(); }
-    redis_t ( socket_t cli ) :obj( new NODE ) { set_fd(cli); }
-    redis_t () : obj( new NODE ) {}
+    virtual ~redis_t () noexcept { if( obj.count()>1 ) { return; } free(); }
+    /*----*/ redis_t ( socket_t cli ) :obj( new NODE ) { set_fd(cli); }
+    /*----*/ redis_t () : obj( new NODE ) {}
 
     /*─······································································─*/
 
-    void set_fd( socket_t cli ) const noexcept { obj->fd=cli; obj->state=1; }
-    socket_t&  get_fd()         const noexcept { return obj->fd;            }
+    void       set_fd( socket_t cli ) const noexcept { obj->fd=cli; obj->state=1; }
+    socket_t&  get_fd() /*---------*/ const noexcept { return obj->fd; }
 
     /*─······································································─*/
 
