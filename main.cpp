@@ -8,17 +8,21 @@ using namespace nodepp;
 void onMain() {
 
     auto db = redis::add("db://localhost:6379");
+    if( !db ){ throw except_t( "something went wrong" ); }
 
     for( auto x=100; x-->0; ){ process::add([=](){
          auto db = redis::add("db://localhost:6379");
+    if ( !db ){ throw except_t( "something went wrong" ); }
 
-         db.emit("LRANGE FOO 0 -1",[=]( string_t data ){
-             console::log( "->", x, data );
-         }); return -1;
+        db.value().emit("LRANGE FOO 0 -1",[=]( string_t data ){
+            console::log( "->", x, data );
+        }); 
+         
+        return -1;
 
     }); }
 
-    db.await( R"( MULTI
+    db.value().emit( R"( MULTI
         DEL   FOO
         LPUSH FOO 1
         LPUSH FOO 2

@@ -27,14 +27,14 @@
 #ifndef NODEPP_REDIS_GENERATOR
 #define NODEPP_REDIS_GENERATOR
 
-namespace nodepp { namespace _redis_ { GENERATOR( cb ){
+namespace nodepp { namespace _redis_ { GENERATOR( pipe ){
 protected:
-    generator::file::write write; 
-    generator::file::read  read;
+//  generator::file::write write;
+    generator::file::read  read ;
 public:
 
     template< class V, class U >
-    coEmit( string_t cmd, const V& cb, const U& self ){
+    coEmit( const V& cb, const U& fd ){
 
         thread_local static ptr_t<regex_t> reg ({
             regex_t( "([^\r]+)\r\n" ),
@@ -45,13 +45,10 @@ public:
             regex_t( "^[!]" )
         });
 
-    auto fd = self->get_fd() ; coBegin
+    coBegin
 
-        coWait( self->is_used() ==1 ); self->use();
-        coWait( write( &fd,cmd )==1 );
-            if( write.state     <=0 ){ coGoto(2); }
-        coWait( read ( &fd )    ==1 );
-            if( read .state     <=0 ){ coGoto(2); }
+        coWait( read( &fd ) ==1 );
+            if( read.state  <=0 ){ coGoto(2); }
 
         do { reg[0].search_all(read.data); 
         auto list =reg[0].get_memory(); reg[0].clear_memory();
@@ -66,9 +63,7 @@ public:
           if  ( string::to_int( list[x].slice(1) )>0 ){ cb( list[++x] ); }}
           else{ continue; }
 
-        } } while(0);
-
-        coYield(2); self->release();
+        } } while(0); coYield(2);
 
     coFinish
     }
@@ -83,81 +78,103 @@ namespace nodepp { class redis_t {
 protected:
 
     enum STATE {
-        SQL_STATE_UNKNOWN = 0b00000000,
-        SQL_STATE_OPEN    = 0b00000001,
-        SQL_STATE_USED    = 0b10000000,
-        SQL_STATE_CLOSE   = 0b00000010
+         REDIS_STATE_UNKNOWN = 0b00000000,
+         REDIS_STATE_OPEN    = 0b00000001,
+         REDIS_STATE_USED    = 0b10000000,
+         REDIS_STATE_CLOSE   = 0b00000010
     };
 
     struct NODE {
         int  state=0; socket_t fd;
     };  ptr_t<NODE> obj;
 
+    void use()     const noexcept { obj->state|= STATE::REDIS_STATE_USED ; }
+    void release() const noexcept { obj->state&=~STATE::REDIS_STATE_USED ; }
+
 public:
 
-    void       set_fd( socket_t cli ) const noexcept { obj->fd=cli; obj->state = STATE::SQL_STATE_OPEN; }
-    socket_t&  get_fd() /*---------*/ const noexcept { return obj->fd; }
+    socket_t& get_fd() /*---------*/ const noexcept { return obj->fd; }
 
     /*─······································································─*/
 
-    redis_t () : obj( new NODE ) { obj->state=STATE::SQL_STATE_CLOSE; }
+    redis_t () : obj( new NODE ) { obj->state=STATE::REDIS_STATE_CLOSE; }
+
    ~redis_t () noexcept { if( obj.count()>1 ) { return; } free(); }
-    redis_t ( socket_t cli ) :obj( new NODE ) { set_fd(cli); }
+    
+    redis_t ( socket_t cli ) :obj( new NODE ) { 
+        obj->fd    = cli; /*-------------*/
+        obj->state = STATE::REDIS_STATE_OPEN;
+    }
 
     /*─······································································─*/
 
-    bool is_closed()    const noexcept { return obj->state & STATE::SQL_STATE_CLOSE; }
-    bool is_used()      const noexcept { return obj->state & STATE::SQL_STATE_USED ; }
-    void close()        const noexcept { /*--*/ obj->state = STATE::SQL_STATE_CLOSE; }
-    void use()          const noexcept { /*--*/ obj->state|= STATE::SQL_STATE_USED ; }
-    void release()      const noexcept { /*--*/ obj->state&=~STATE::SQL_STATE_USED ; }
+    bool is_closed()    const noexcept { return obj->state & STATE::REDIS_STATE_CLOSE; }
+    bool is_used()      const noexcept { return obj->state & STATE::REDIS_STATE_USED ; }
+    void close()        const noexcept { /*--*/ obj->state = STATE::REDIS_STATE_CLOSE; }
     bool is_available() const noexcept { return !is_closed(); }
 
     /*─······································································─*/
 
-    promise_t<array_t<string_t>,except_t> resolve( const string_t& cmd ) const { 
-           queue_t<string_t> arr; auto self = type::bind( this );
-    return promise_t<array_t<string_t>,except_t>([=]( 
-        res_t<array_t<string_t>> res, 
-        rej_t<except_t> /*----*/ rej
-    ){
+    expected_t<redis_t,except_t>
+    emit( const string_t& cmd, function_t<void,string_t> cb=nullptr ) const noexcept {
+    except_t err; do {
 
-        function_t<void,string_t> cb ([=]( string_t args ){ arr.push(args); });
-        
-        if( cmd.empty() || self->is_closed() || self->obj->fd.is_closed() )
-          { rej(except_t( "redis Error: closed" )); return; }
-
-        auto task = type::bind( _redis_::cb() ); process::add([=](){
-            while( (*task)( cmd+"\n", cb, self )==1 ){ return 1; }
-            res( arr.data() ); return -1; 
-        }); 
-    
-    }); }
-
-    /*─······································································─*/
-
-    expected_t<array_t<sql_item_t>,except_t> 
-    await( const string_t& cmd ) const { return resolve( cmd ).await(); }
-
-    /*─······································································─*/
-
-    optional_t<except_t>
-    emit( const string_t& cmd, function_t<void,string_t> cb=nullptr ) const {
+        if( is_used() )
+          { return except_t( "redis Error: already in use" ); }
         
         if( cmd.empty() || is_closed() || obj->fd.is_closed() )
-          { return except_t( "Redis Error: closed" ); }
+          { err = except_t( "Redis Error: closed" ); break; }
 
-        _redis_::cb task; auto self = type::bind( this );
-        process::add( task, cmd+"\n", cb, self );
+        auto pipe = type::bind( _redis_::pipe() );
+        auto self = type::bind( this ); 
+        obj->fd.write( cmd + "\n" ); use();
 
-    return nullptr; }
+        process::poll( get_fd(), POLL_STATE::READ | POLL_STATE::EDGE, [=](){
+            while( (*pipe)(cb,self->get_fd())==1 ){ /*unused*/ }
+            self->release(); /*------------------*/ return -1;
+        });
+
+        /*--------------*/ return *this; 
+    } while(0); release(); return  err ; }
+
+    /*─······································································─*/
+
+    promise_t<ptr_t<string_t>,except_t> resolve( const string_t& cmd ) const noexcept { 
+
+        auto self = type::bind( this ); queue_t<string_t> list; 
+
+    return promise_t<ptr_t<string_t>,except_t>([=]( 
+        res_t<ptr_t<string_t>> res, 
+        rej_t<except_t> /*--*/ rej
+    ){ except_t err; do {
+
+        if( self->is_used() )
+          { rej( except_t( "redis Error: already in use" ) ); return; }
+        
+        if( cmd.empty() || self->is_closed() || self->obj->fd.is_closed() )
+          { err = except_t( "redis Error: closed" ); break; }
+
+        function_t<void,string_t> cb ([=]( string_t args ){ 
+            list.push(args); 
+        });
+
+        auto pipe = type::bind( _redis_::pipe() ); 
+        self->obj->fd.write( cmd + "\n" ); 
+        self->use();
+        
+        process::poll( self->get_fd(), POLL_STATE::READ | POLL_STATE::EDGE, [=](){
+            while( (*pipe)(cb,self->get_fd())==1 ){ /*unused*/ }
+            res( list.data() ); self->release(); return -1; 
+        }); 
+    
+    return; } while(0); release(); rej( err ); }); }
 
     /*─······································································─*/
 
     void free() const noexcept {
-        if( obj->state==0 ){ return; }
+        if( obj->state==0 ){ return ; }
             obj->state =0; release(); 
-            onUse.clear(); get_fd().free();
+        get_fd().free();
     }
 
 };}
@@ -184,10 +201,9 @@ namespace nodepp { namespace redis {
         }
 
         auto client= tcp_t ([=]( socket_t cli ){
-        auto rdis  = redis_t();
-             rdis.set_fd( cli ); if( !Auth.empty() )
-           { rdis.await( Auth ); } res(rdis); return;
-        });
+        auto rdis  = redis_t(cli); if( !Auth.empty() )
+           { rdis.resolve( Auth ).await(); } 
+        res(rdis); return; });
 
         client.onError([=]( except_t error ){ rej(error); });
         client.connect( host, port );

@@ -57,7 +57,7 @@ void main() {
 ```
 
 ## Asynchronous API Reference
-The redis_t class provides three core methods that align with Nodepp's event loop structure for executing raw RESP commands. Note: Commands must be sent in the raw RESP format (e.g., SET mykey myvalue\r\n).
+The redis_t class provides three core methods that align with Nodepp's event loop structure for executing raw RESP commands. Note: Commands must be sent in the raw RESP format (e.g., SET mykey myvalue).
 
 **1. Promise-based (.resolve()) - Preferred Method**
 Runs the command and returns a promise that resolves with an array of responses (or rejects on error/closed connection).
@@ -74,21 +74,7 @@ db.resolve("GET FOO")
 });
 ```
 
-**2. Synchronous/Blocking (.await()) - Fiber Only**
-A convenience method for use within a Nodepp coroutine (fiber), allowing the code to look synchronous while internally yielding the fiber until the response is ready.
-
-```cpp
-try {
-
-    auto results = db.await("LRANGE FOO");
-    console::log( "Current item:", results[0] );
-
-} catch( except_t error ) {
-    console::error("Synchronous read failed:", error.what());
-}
-```
-
-**3. Fire-and-Forget (.emit())**
+**2. Fire-and-Forget (.emit())**
 Used primarily for commands where you don't need to wait for a full response (like simple SETs) or for streaming results (though streaming is limited by the current parser).
 
 ```cpp
